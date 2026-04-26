@@ -1,0 +1,27 @@
+[package]
+name    = "aldutex"
+version = "0.1.0"
+edition = "2021"
+description = "Pure-Rust LaTeX typesetting engine. Part of the Aldine project."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+rustybuzz        = "0.14"
+skrifa           = "0.22"
+read-fonts       = "0.22"
+pdf-writer       = "0.12"
+krilla           = "0.3"
+hyphenation      = { version = "0.8", features = ["embed_all"] }
+miette           = { version = "5", features = ["fancy"] }
+thiserror        = "1"
+serde            = { version = "1", features = ["derive"] }
+bincode          = "2"
+rustc-hash       = "2"
+unicode-segmentation = "1"
+unicode-linebreak = "0.1"
+image            = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+ttf-parser = "0.25.1"
+
+[dev-dependencies]
+# For golden file testing
+similar = "2"    # diff algorithm for comparing expected vs actual output
