@@ -231,3 +231,20 @@ Hello~world.
         assert!(has_nbsp, "Should contain NonBreakingSpace");
     }
 }
+#[test]
+fn test_display_math_brackets() {
+    let source = r#"\documentclass{article}
+\begin{document}
+\[ x^2 + 1 = 0 \]
+\end{document}"#;
+    let (doc, diag) = parse_source(source);
+    assert!(!diag.has_errors(), "Errors: {:?}", diag.errors);
+    assert!(diag.warnings.is_empty(), "Warnings: {:?}", diag.warnings);
+
+    if let Some(Block::Paragraph { inlines, .. }) = doc.body.first() {
+        let has_math = inlines.iter().any(|i| matches!(i, Inline::Math { .. }));
+        assert!(has_math, "Should contain Math node from \\[ \\]");
+    } else {
+        panic!("Expected Paragraph with Math node");
+    }
+}

@@ -1748,6 +1748,16 @@ impl<'src> Parser<'src> {
                             span: start.merge(end),
                         })
                     }
+                    "[" => {
+                        let start = tok.span;
+                        self.advance(); // consume \[
+                        let node = self.parse_math_until_display_bracket();
+                        let end = self.current_span();
+                        Some(ast::Inline::Math {
+                            node,
+                            span: start.merge(end),
+                        })
+                    }
                     // Unknown command
                     _ => {
                         let start = tok.span;
@@ -2033,6 +2043,36 @@ impl<'src> Parser<'src> {
             ) {
                 self.advance(); // consume closing $$
                 break;
+            }
+
+            if let Some(node) = self.parse_math_atom() {
+                children.push(node);
+            } else {
+                break;
+            }
+        }
+
+        let end = self.current_span();
+        ast::MathNode::Group {
+            children,
+            span: start.merge(end),
+        }
+    }
+
+    fn parse_math_until_display_bracket(&mut self) -> ast::MathNode {
+        let mut children = Vec::new();
+        let start = self.current_span();
+
+        loop {
+            if self.pos >= self.tokens.len() {
+                break;
+            }
+
+            if let Some(Token { kind: TokenKind::Command(name), .. }) = self.peek() {
+                if name == "]" {
+                    self.advance(); // consume \]
+                    break;
+                }
             }
 
             if let Some(node) = self.parse_math_atom() {
