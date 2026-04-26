@@ -204,82 +204,14 @@ pub fn layout_document(
     let mut current_page_lines = Vec::new();
     let mut current_y = layout.margin_top;
 
-    let text_width = layout.text_width();
-    let max_y = layout.height_pt - layout.margin_bot;
-
-    for block in &doc.body {
-        let mut block_lines = Vec::new();
-
-        match block {
-            ast::Block::Paragraph { inlines, .. } => {
-                let ctx = LayoutContext {
-                    fonts,
-                    size_pt: 10.0,
-                };
-                let items = build_paragraph_items(&ctx, inlines, FontRegistry::regular());
-                let breaks = break_paragraph(&items, text_width, 10.0, 50.0);
-                block_lines = items_to_lines(&items, &breaks, text_width);
-            }
-            ast::Block::Section { level, title, .. } => {
-                let size_pt = if *level == 1 { 18.0 } else { 14.0 };
-                let ctx = LayoutContext { fonts, size_pt };
-                let items = build_paragraph_items(&ctx, title, FontRegistry::bold());
-                let breaks = break_paragraph(&items, text_width, 10.0, 50.0);
-                block_lines = items_to_lines(&items, &breaks, text_width);
-
-                // Add pre-section padding
-                current_y += size_pt;
-            }
-            ast::Block::VSpace { amount_pt, .. } => {
-                current_y += amount_pt;
-            }
-            ast::Block::PageBreak { .. } => {
-                pages.push(LayoutPage {
-                    width: layout.width_pt,
-                    height: layout.height_pt,
-                    lines: current_page_lines.clone(),
-                    footnotes: Vec::new(),
-                });
-                current_page_lines.clear();
-                current_y = layout.margin_top;
-            }
-            _ => {
-                // Unsupported blocks for now (Math Block, Tables, Lists)
-                // fall through and do nothing.
-            }
-        }
-
-        // Add lines to page
-        for mut line in block_lines {
-            // Check page overflow
-            if current_y + line.height + line.depth > max_y && !current_page_lines.is_empty() {
-                pages.push(LayoutPage {
-                    width: layout.width_pt,
-                    height: layout.height_pt,
-                    lines: current_page_lines.clone(),
-                    footnotes: Vec::new(),
-                });
-                current_page_lines.clear();
-                current_y = layout.margin_top;
-            }
-
-            // Reposition line absolutely relative to the page definition.
-            current_y += line.height;
-
-            for box_ in &mut line.boxes {
-                box_.x += layout.margin_left;
-                box_.y += current_y;
-            }
-
-            line.baseline_y = current_y;
-            current_page_lines.push(line.clone());
-
-            current_y += line.depth + 3.0; // Minimal line gap
-        }
-
-        // Post-block gap
-        current_y += 10.0;
-    }
+    layout_blocks(
+        &doc.body,
+        fonts,
+        layout,
+        &mut current_y,
+        &mut current_page_lines,
+        &mut pages,
+    );
 
     // Flush final page
     if !current_page_lines.is_empty() || pages.is_empty() {
@@ -292,4 +224,124 @@ pub fn layout_document(
     }
 
     pages
+}
+
+fn layout_blocks(
+    blocks: &[ast::Block],
+    fonts: &FontRegistry,
+    layout: &PageLayout,
+    current_y: &mut f64,
+    current_page_lines: &mut Vec<LayoutLine>,
+    pages: &mut Vec<LayoutPage>,
+) {
+    let text_width = layout.text_width();
+    let max_y = layout.height_pt - layout.margin_bot;
+
+    for block in blocks {
+        let mut block_lines = Vec::new();
+
+        match block {
+            ast::Block::Paragraph { inlines, .. } => {
+                let ctx = LayoutContext {
+                    fonts,
+                    size_pt: 10.0,
+                };
+                let items = build_paragraph_items(&ctx, inlines, FontRegistry::regular());
+                let breaks = break_paragraph(&items, text_width, 10.0, 50.0);
+                block_lines = items_to_lines(&items, &breaks, text_width);
+            }
+            ast::Block::Section {
+                level,
+                title,
+                body,
+                ..
+            } => {
+                let size_pt = if *level == 1 { 18.0 } else { 14.0 };
+                let ctx = LayoutContext { fonts, size_pt };
+                let items = build_paragraph_items(&ctx, title, FontRegistry::bold());
+                let breaks = break_paragraph(&items, text_width, 10.0, 50.0);
+                block_lines = items_to_lines(&items, &breaks, text_width);
+
+                // Add pre-section padding
+                *current_y += size_pt;
+
+                // Process title lines
+                add_lines_to_page(
+                    block_lines,
+                    layout,
+                    current_y,
+                    current_page_lines,
+                    pages,
+                    max_y,
+                );
+                block_lines = Vec::new(); // already handled
+
+                // RECURSIVE: Process section body
+                layout_blocks(body, fonts, layout, current_y, current_page_lines, pages);
+            }
+            ast::Block::VSpace { amount_pt, .. } => {
+                *current_y += amount_pt;
+            }
+            ast::Block::PageBreak { .. } => {
+                pages.push(LayoutPage {
+                    width: layout.width_pt,
+                    height: layout.height_pt,
+                    lines: current_page_lines.clone(),
+                    footnotes: Vec::new(),
+                });
+                current_page_lines.clear();
+                *current_y = layout.margin_top;
+            }
+            _ => {}
+        }
+
+        // Add remaining lines to page (e.g. from Paragraph or Section title if not cleared)
+        add_lines_to_page(
+            block_lines,
+            layout,
+            current_y,
+            current_page_lines,
+            pages,
+            max_y,
+        );
+
+        // Post-block gap
+        *current_y += 10.0;
+    }
+}
+
+fn add_lines_to_page(
+    lines: Vec<LayoutLine>,
+    layout: &PageLayout,
+    current_y: &mut f64,
+    current_page_lines: &mut Vec<LayoutLine>,
+    pages: &mut Vec<LayoutPage>,
+    max_y: f64,
+) {
+    for mut line in lines {
+        // Check page overflow
+        if *current_y + line.height + line.depth > max_y && !current_page_lines.is_empty() {
+            pages.push(LayoutPage {
+                width: layout.width_pt,
+                height: layout.height_pt,
+                lines: current_page_lines.clone(),
+                footnotes: Vec::new(),
+            });
+            current_page_lines.clear();
+            *current_y = layout.margin_top;
+        }
+
+        // Reposition line absolutely relative to the page definition.
+        *current_y += line.height;
+
+        for box_ in &mut line.boxes {
+            box_.x += layout.margin_left;
+            box_.y += *current_y;
+        }
+
+        line.baseline_y = *current_y;
+        current_page_lines.push(line.clone());
+
+        *current_y += line.depth + 3.0; // Minimal line gap
+    }
 }
