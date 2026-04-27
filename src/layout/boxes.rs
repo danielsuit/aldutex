@@ -22,7 +22,12 @@ pub enum BoxContent {
         font_id: FontId,
         glyph_id: u16,
         size_pt: f64,
+        /// Horizontal advance.
         width: f64,
+        /// Vertical offset (relative to baseline).
+        x_offset: f64,
+        /// Vertical offset (relative to baseline).
+        y_offset: f64,
         height: f64,
         depth: f64,
     },

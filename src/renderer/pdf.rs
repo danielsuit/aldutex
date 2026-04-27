@@ -65,9 +65,7 @@ pub fn render_to_pdf(
                 match &box_.content {
                     BoxContent::Glyph {
                         font_id,
-                        glyph_id,
                         size_pt,
-                        width,
                         ..
                     } => {
                         let is_new_run = current_font != Some(*font_id) || current_size != *size_pt;
@@ -96,15 +94,20 @@ pub fn render_to_pdf(
                         }
 
                         let relative_x = box_.x - current_run_start_x;
+                        let relative_y = box_.y - line.baseline_y;
 
-                        current_glyphs.push(KrillaGlyph::new(
-                            GlyphId::new(*glyph_id as u32),
-                            *width as f32,
-                            relative_x as f32,
-                            0.0, // box_.y relative to baseline is usually 0 unless doing sub/superscripts
-                            0.0,
-                            0..0, // empty text range
-                        ));
+                        if let BoxContent::Glyph { glyph_id, x_offset, y_offset, .. } = &box_.content {
+                            current_glyphs.push(KrillaGlyph::new(
+                                GlyphId::new(*glyph_id as u32),
+                                // Set advance to 0 because we are providing absolute positions via offsets.
+                                // This prevents double-spacing between characters.
+                                0.0, 
+                                (relative_x + x_offset) as f32,
+                                (relative_y + y_offset) as f32,
+                                0.0,
+                                0..0,
+                            ));
+                        }
                     }
                     _ => {
                         // Image, rule, link processing stub.

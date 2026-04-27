@@ -117,6 +117,8 @@ fn build_paragraph_items(
                                         glyph_id: g.glyph_id,
                                         size_pt: ctx.size_pt,
                                         width: g.x_advance,
+                                        x_offset: g.x_offset,
+                                        y_offset: g.y_offset,
                                         height: ascender,
                                         depth: descender,
                                     },
@@ -170,6 +172,18 @@ fn build_paragraph_items(
                         width: space_width,
                         stretch: space_width / 2.0,
                         shrink: space_width / 3.0,
+                    });
+                }
+                ast::Inline::Math { node, .. } => {
+                    let math_layout = super::math::layout_math(
+                        node,
+                        ctx.fonts,
+                        ctx.size_pt,
+                        super::math::LayoutStyle::Text,
+                    );
+                    items.push(Item::Box {
+                        width: math_layout.width,
+                        content: math_layout.boxes,
                     });
                 }
                 _ => {} // Remaining inlines simplified for Stage 6
@@ -291,6 +305,27 @@ fn layout_blocks(
                 });
                 current_page_lines.clear();
                 *current_y = layout.margin_top;
+            }
+            ast::Block::MathBlock { node, .. } => {
+                let math_layout = super::math::layout_math(
+                    node,
+                    fonts,
+                    12.0,
+                    super::math::LayoutStyle::Display,
+                );
+                // Center display math
+                let x_offset = (text_width - math_layout.width) / 2.0;
+                let mut boxes = math_layout.boxes;
+                for b in &mut boxes {
+                    b.x += x_offset;
+                }
+                block_lines.push(crate::layout::boxes::LayoutLine {
+                    boxes,
+                    width: math_layout.width,
+                    height: math_layout.height,
+                    depth: math_layout.depth,
+                    baseline_y: 0.0,
+                });
             }
             _ => {}
         }
