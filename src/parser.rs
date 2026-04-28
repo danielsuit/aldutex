@@ -728,13 +728,26 @@ impl<'src> Parser<'src> {
             None
         };
 
-        // Parse content blocks until next \item or \end{env}
+        // Parse content blocks until next \item or \end{env}. Do NOT skip
+        // whitespace inside the loop — parse_inline emits whitespace as a
+        // " " text inline, which is needed to keep words apart. We only trim
+        // leading/trailing whitespace when flushing each paragraph.
         let mut content = Vec::new();
         let mut current_inlines = Vec::new();
 
-        loop {
-            self.skip_whitespace();
+        let flush =
+            |inlines: &mut Vec<ast::Inline>, content: &mut Vec<ast::Block>| {
+                trim_inlines(inlines);
+                if !inlines.is_empty() {
+                    let span = inlines_span(inlines);
+                    content.push(ast::Block::Paragraph {
+                        inlines: std::mem::take(inlines),
+                        span,
+                    });
+                }
+            };
 
+        loop {
             if self.pos >= self.tokens.len() {
                 break;
             }
@@ -751,19 +764,12 @@ impl<'src> Parser<'src> {
 
             // Check for nested \begin{...}
             if self.is_command("begin") {
-                // Flush current inlines as paragraph
-                if !current_inlines.is_empty() {
-                    let span = inlines_span(&current_inlines);
-                    content.push(ast::Block::Paragraph {
-                        inlines: std::mem::take(&mut current_inlines),
-                        span,
-                    });
-                }
+                flush(&mut current_inlines, &mut content);
                 content.push(self.parse_environment());
                 continue;
             }
 
-            // Skip paragraph breaks — start new paragraph
+            // Paragraph break — flush current inlines and start a new paragraph.
             if matches!(
                 self.peek(),
                 Some(Token {
@@ -771,18 +777,11 @@ impl<'src> Parser<'src> {
                     ..
                 })
             ) {
-                if !current_inlines.is_empty() {
-                    let span = inlines_span(&current_inlines);
-                    content.push(ast::Block::Paragraph {
-                        inlines: std::mem::take(&mut current_inlines),
-                        span,
-                    });
-                }
+                flush(&mut current_inlines, &mut content);
                 self.advance();
                 continue;
             }
 
-            // Parse inline content
             if let Some(inline) = self.parse_inline() {
                 current_inlines.push(inline);
             } else {
@@ -790,13 +789,7 @@ impl<'src> Parser<'src> {
             }
         }
 
-        if !current_inlines.is_empty() {
-            let span = inlines_span(&current_inlines);
-            content.push(ast::Block::Paragraph {
-                inlines: current_inlines,
-                span,
-            });
-        }
+        flush(&mut current_inlines, &mut content);
 
         ast::ListItem {
             label,

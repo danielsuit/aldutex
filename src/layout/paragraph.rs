@@ -291,7 +291,6 @@ pub fn break_paragraph(
 pub fn items_to_lines(items: &[Item], breaks: &[usize], line_width: f64) -> Vec<LayoutLine> {
     let mut lines = Vec::new();
     let mut start_idx = 0;
-    let mut current_y = 0.0;
 
     for &end_idx in breaks {
         // Collect items for this line
@@ -363,7 +362,6 @@ pub fn items_to_lines(items: &[Item], breaks: &[usize], line_width: f64) -> Vec<
 
                         let mut positioned = b.clone();
                         positioned.x += current_x;
-                        positioned.y += current_y;
                         out_boxes.push(positioned);
                     }
                     current_x += w;
@@ -385,18 +383,17 @@ pub fn items_to_lines(items: &[Item], breaks: &[usize], line_width: f64) -> Vec<
             }
         }
 
-        // Advance Y for next line based on bounds or leading
-        let line_height = f64::max(max_ascender + max_descender, 12.0); // min leading
-
+        // Each line is emitted with box positions relative to its own
+        // baseline. The page-layout pass (add_lines_to_page) is responsible
+        // for stacking lines vertically and assigning absolute baseline_y.
         lines.push(LayoutLine {
             boxes: out_boxes,
             width: current_x,
             height: max_ascender,
             depth: max_descender,
-            baseline_y: current_y,
+            baseline_y: 0.0,
         });
 
-        current_y += line_height * 1.2; // 1.2 line spacing
         start_idx = end_idx + 1;
     }
 

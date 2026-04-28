@@ -122,6 +122,75 @@ Math: $$x + 1$$
 }
 
 #[test]
+fn test_itemize_renders_bullets_and_text() {
+    let source = r#"\documentclass{article}
+\begin{document}
+Before list.
+\begin{itemize}
+\item First apple item.
+\item Second banana item.
+\item Third cherry item.
+\end{itemize}
+After list.
+\end{document}"#;
+
+    let tokens = aldutex::lexer::Lexer::new(source).tokenize();
+    let (doc, diag) = aldutex::parser::Parser::new(tokens, source).parse();
+    assert!(!diag.has_errors(), "Diagnostics: {:?}", diag.errors);
+
+    let fonts = aldutex::fonts::loader::FontRegistry::new().unwrap();
+    let layout = aldutex::layout::page::PageLayout::letter_default();
+    let pages = aldutex::layout::page::layout_document(&doc, &fonts, &layout);
+
+    let total_lines: usize = pages.iter().map(|p| p.lines.len()).sum();
+    // 1 (Before list.) + 3 (one per item) + 1 (After list.) = 5
+    assert!(
+        total_lines >= 5,
+        "Expected >= 5 lines for itemize content, got {total_lines}"
+    );
+
+    let glyph_count: usize = pages
+        .iter()
+        .flat_map(|p| p.lines.iter())
+        .flat_map(|l| l.boxes.iter())
+        .filter(|b| matches!(
+            b.content,
+            aldutex::layout::boxes::BoxContent::Glyph { .. }
+        ))
+        .count();
+    assert!(
+        glyph_count > 40,
+        "Expected list items to produce many glyphs, got {glyph_count}"
+    );
+}
+
+#[test]
+fn test_enumerate_numbers_each_item() {
+    let source = r#"\documentclass{article}
+\begin{document}
+\begin{enumerate}
+\item Alpha.
+\item Beta.
+\item Gamma.
+\end{enumerate}
+\end{document}"#;
+
+    let tokens = aldutex::lexer::Lexer::new(source).tokenize();
+    let (doc, diag) = aldutex::parser::Parser::new(tokens, source).parse();
+    assert!(!diag.has_errors(), "Diagnostics: {:?}", diag.errors);
+
+    let fonts = aldutex::fonts::loader::FontRegistry::new().unwrap();
+    let layout = aldutex::layout::page::PageLayout::letter_default();
+    let pages = aldutex::layout::page::layout_document(&doc, &fonts, &layout);
+
+    let total_lines: usize = pages.iter().map(|p| p.lines.len()).sum();
+    assert!(
+        total_lines >= 3,
+        "Expected one line per enumerate item, got {total_lines}"
+    );
+}
+
+#[test]
 fn test_supported_latex_symbol_debug_output_pdf() {
     let source = build_supported_symbol_debug_source();
 

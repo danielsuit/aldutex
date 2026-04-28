@@ -327,6 +327,19 @@ fn layout_blocks(
                     baseline_y: 0.0,
                 });
             }
+            ast::Block::List { kind, items, .. } => {
+                layout_list(
+                    *kind,
+                    items,
+                    fonts,
+                    layout,
+                    current_y,
+                    current_page_lines,
+                    pages,
+                    max_y,
+                    0.0,
+                );
+            }
             _ => {}
         }
 
@@ -379,4 +392,208 @@ fn add_lines_to_page(
 
         *current_y += line.depth + 3.0; // Minimal line gap
     }
+}
+
+/// Lay out an itemize/enumerate/description list. `indent_in_text` is the
+/// horizontal offset (relative to the text area's left edge) at which this
+/// list's marker column sits. Nested lists pass a deeper indent.
+fn layout_list(
+    kind: ast::ListKind,
+    items: &[ast::ListItem],
+    fonts: &FontRegistry,
+    layout: &PageLayout,
+    current_y: &mut f64,
+    current_page_lines: &mut Vec<LayoutLine>,
+    pages: &mut Vec<LayoutPage>,
+    max_y: f64,
+    indent_in_text: f64,
+) {
+    let body_size_pt = 10.0;
+    let level_indent = 18.0;
+    let label_sep = 6.0;
+    let marker_x = indent_in_text;
+    let text_x = indent_in_text + level_indent;
+    let item_text_width = (layout.text_width() - text_x).max(50.0);
+    let ctx = LayoutContext {
+        fonts,
+        size_pt: body_size_pt,
+    };
+
+    for (i, item) in items.iter().enumerate() {
+        let marker_text = match kind {
+            ast::ListKind::Itemize => "•".to_string(),
+            ast::ListKind::Enumerate => format!("{}.", i + 1),
+            ast::ListKind::Description => item
+                .label
+                .as_ref()
+                .map(|l| inlines_plain_text(l))
+                .unwrap_or_default(),
+        };
+
+        let mut marker_emitted = false;
+
+        for item_block in &item.content {
+            match item_block {
+                ast::Block::Paragraph { inlines, .. } => {
+                    let para_items =
+                        build_paragraph_items(&ctx, inlines, FontRegistry::regular());
+                    let breaks =
+                        break_paragraph(&para_items, item_text_width, 10.0, 50.0);
+                    let mut lines = items_to_lines(&para_items, &breaks, item_text_width);
+
+                    for line in &mut lines {
+                        for b in &mut line.boxes {
+                            b.x += text_x;
+                        }
+                        line.width += text_x;
+                    }
+
+                    if !marker_emitted && !lines.is_empty() && !marker_text.is_empty() {
+                        let (marker_boxes, marker_advance) = shape_marker(
+                            fonts,
+                            FontRegistry::regular(),
+                            body_size_pt,
+                            &marker_text,
+                            marker_x,
+                        );
+                        // For description lists, push text right if the label runs
+                        // past its column.
+                        if matches!(kind, ast::ListKind::Description)
+                            && marker_x + marker_advance + label_sep > text_x
+                        {
+                            let shift = marker_x + marker_advance + label_sep - text_x;
+                            for b in &mut lines[0].boxes {
+                                b.x += shift;
+                            }
+                        }
+                        let mut new_boxes = marker_boxes;
+                        new_boxes.append(&mut lines[0].boxes);
+                        lines[0].boxes = new_boxes;
+                        marker_emitted = true;
+                    }
+
+                    add_lines_to_page(
+                        lines,
+                        layout,
+                        current_y,
+                        current_page_lines,
+                        pages,
+                        max_y,
+                    );
+                }
+                ast::Block::List {
+                    kind: nested_kind,
+                    items: nested_items,
+                    ..
+                } => {
+                    layout_list(
+                        *nested_kind,
+                        nested_items,
+                        fonts,
+                        layout,
+                        current_y,
+                        current_page_lines,
+                        pages,
+                        max_y,
+                        text_x,
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        // If an item had no paragraph content, still emit a marker-only line so
+        // the bullet shows up.
+        if !marker_emitted && !marker_text.is_empty() {
+            let (marker_boxes, _) = shape_marker(
+                fonts,
+                FontRegistry::regular(),
+                body_size_pt,
+                &marker_text,
+                marker_x,
+            );
+            let font = fonts.get(FontRegistry::regular());
+            let ascender = crate::fonts::metrics::ascender_pt(font, body_size_pt);
+            let descender = crate::fonts::metrics::descender_pt(font, body_size_pt);
+            let line = LayoutLine {
+                boxes: marker_boxes,
+                width: text_x,
+                height: ascender,
+                depth: descender,
+                baseline_y: 0.0,
+            };
+            add_lines_to_page(
+                vec![line],
+                layout,
+                current_y,
+                current_page_lines,
+                pages,
+                max_y,
+            );
+        }
+
+        *current_y += 2.0;
+    }
+}
+
+/// Shape `text` as marker glyphs starting at x = `start_x`. Returns the
+/// glyph boxes and the total horizontal advance.
+fn shape_marker(
+    fonts: &FontRegistry,
+    font_id: FontId,
+    size_pt: f64,
+    text: &str,
+    start_x: f64,
+) -> (Vec<LayoutBox>, f64) {
+    let font = fonts.get(font_id);
+    let ascender = crate::fonts::metrics::ascender_pt(font, size_pt);
+    let descender = crate::fonts::metrics::descender_pt(font, size_pt);
+    let glyphs = crate::fonts::shaper::shape_text(
+        font,
+        text,
+        size_pt,
+        rustybuzz::Direction::LeftToRight,
+    );
+
+    let mut boxes = Vec::new();
+    let mut x = start_x;
+    let mut total = 0.0;
+    for g in glyphs {
+        boxes.push(LayoutBox {
+            x: x + g.x_offset,
+            y: g.y_offset,
+            content: BoxContent::Glyph {
+                font_id,
+                glyph_id: g.glyph_id,
+                size_pt,
+                width: g.x_advance,
+                x_offset: g.x_offset,
+                y_offset: g.y_offset,
+                height: ascender,
+                depth: descender,
+            },
+        });
+        x += g.x_advance;
+        total += g.x_advance;
+    }
+    (boxes, total)
+}
+
+/// Flatten a tree of inlines into plain text (for description list labels).
+fn inlines_plain_text(inlines: &[ast::Inline]) -> String {
+    let mut s = String::new();
+    for inline in inlines {
+        match inline {
+            ast::Inline::Text { content, .. } => s.push_str(content),
+            ast::Inline::Bold { content, .. }
+            | ast::Inline::Italic { content, .. }
+            | ast::Inline::BoldItalic { content, .. }
+            | ast::Inline::Monospace { content, .. } => {
+                s.push_str(&inlines_plain_text(content));
+            }
+            ast::Inline::NonBreakingSpace { .. } => s.push(' '),
+            _ => {}
+        }
+    }
+    s
 }
