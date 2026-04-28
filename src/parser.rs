@@ -408,6 +408,17 @@ impl<'src> Parser<'src> {
                         self.advance();
                         None
                     }
+                    "[" => {
+                        // \[ ... \] is a display-math block (centered).
+                        let start = tok.span;
+                        self.advance(); // consume \[
+                        let node = self.parse_math_until_display_bracket();
+                        let end = self.current_span();
+                        Some(ast::Block::MathBlock {
+                            node,
+                            span: start.merge(end),
+                        })
+                    }
                     _ => {
                         // Could be inline command starting a paragraph
                         Some(self.parse_paragraph())
@@ -2066,6 +2077,23 @@ impl<'src> Parser<'src> {
         loop {
             if self.pos >= self.tokens.len() {
                 break;
+            }
+
+            // Skip whitespace and newlines so the `\]` check below catches
+            // the closing delimiter even when preceded by line breaks.
+            // Without this, a recursive parse_math_atom call on a Newline
+            // would consume `\]` as if it were an unknown command.
+            if matches!(
+                self.peek(),
+                Some(Token {
+                    kind: TokenKind::Whitespace
+                        | TokenKind::Newline
+                        | TokenKind::ParagraphBreak,
+                    ..
+                })
+            ) {
+                self.advance();
+                continue;
             }
 
             if let Some(Token { kind: TokenKind::Command(name), .. }) = self.peek() {

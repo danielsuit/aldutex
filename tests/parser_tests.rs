@@ -270,10 +270,29 @@ fn test_display_math_brackets() {
     assert!(!diag.has_errors(), "Errors: {:?}", diag.errors);
     assert!(diag.warnings.is_empty(), "Warnings: {:?}", diag.warnings);
 
+    // \[ ... \] at block level produces a centered display-math block.
+    assert!(
+        matches!(doc.body.first(), Some(Block::MathBlock { .. })),
+        "Expected MathBlock from \\[ \\], got {:?}",
+        doc.body.first()
+    );
+}
+
+#[test]
+fn test_inline_display_math_brackets_inside_paragraph() {
+    // When `\[` follows running text it stays inline — block-level promotion
+    // only triggers when `\[` is the first command of a fresh block.
+    let source = r#"\documentclass{article}
+\begin{document}
+Before \[ x^2 \] after.
+\end{document}"#;
+    let (doc, diag) = parse_source(source);
+    assert!(!diag.has_errors(), "Errors: {:?}", diag.errors);
+
     if let Some(Block::Paragraph { inlines, .. }) = doc.body.first() {
         let has_math = inlines.iter().any(|i| matches!(i, Inline::Math { .. }));
-        assert!(has_math, "Should contain Math node from \\[ \\]");
+        assert!(has_math, "Inline \\[ \\] in paragraph should produce Math inline");
     } else {
-        panic!("Expected Paragraph with Math node");
+        panic!("Expected Paragraph, got {:?}", doc.body.first());
     }
 }
