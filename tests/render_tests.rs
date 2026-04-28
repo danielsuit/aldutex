@@ -334,6 +334,12 @@ fn build_supported_symbol_debug_source() -> String {
         "x^2 + y_1 + z_{i}^{n}",
     );
 
+    // Display-math via `\[ ... \]` delimiters.
+    source.push_str("Display math via \\[ \\] delimiters:\n\n");
+    source.push_str("\\[\n");
+    source.push_str("  \\int_0^1 x^2\\,dx = \\frac{1}{3}\n");
+    source.push_str("\\]\n");
+
     source.push_str("\\end{document}");
     source
 }
