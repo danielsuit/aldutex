@@ -6,10 +6,10 @@ use crate::layout::page::{LayoutPage, PageLayout};
 
 use krilla::color::rgb;
 use krilla::font::{Font, GlyphUnits, KrillaGlyph};
-use krilla::path::Fill;
+use krilla::geom::{Point, Rect};
+use krilla::path::{Fill, PathBuilder};
 use krilla::{Document, PageSettings};
 use skrifa::GlyphId;
-use krilla::geom::Point;
 
 /// Helper to get a Krilla Font from our FontRegistry.
 fn get_krilla_font(
@@ -24,8 +24,8 @@ fn get_krilla_font(
     let loaded_font = registry.get(font_id);
     let krilla_font = Font::new(
         loaded_font.data.clone(),
-        0, // assume face index 0
-        vec![], // features
+        0,
+        vec![],
     )
     .ok_or_else(|| miette::miette!("Failed to load PDF font"))?;
 
@@ -42,7 +42,6 @@ pub fn render_to_pdf(
     let mut document = Document::new();
     let mut font_cache = std::collections::HashMap::<u8, Font>::new();
 
-    // Default black paint for text
     let fill = Fill {
         paint: rgb::Color::black().into(),
         ..Default::default()
@@ -54,8 +53,6 @@ pub fn render_to_pdf(
         let mut surface = krilla_page.surface();
 
         for line in &page.lines {
-            // Because krilla clusters glyphs by font and style, we should group consecutive
-            // glyphs of the same font and size.
             let mut current_font: Option<crate::fonts::loader::FontId> = None;
             let mut current_size: f64 = 0.0;
             let mut current_glyphs = Vec::new();
@@ -71,19 +68,17 @@ pub fn render_to_pdf(
                         let is_new_run = current_font != Some(*font_id) || current_size != *size_pt;
 
                         if is_new_run && !current_glyphs.is_empty() {
-                            // Flush current run
                             let k_font = get_krilla_font(current_font.unwrap(), fonts, &mut font_cache)?;
                             surface.fill_glyphs(
                                 Point::from_xy(current_run_start_x as f32, line.baseline_y as f32),
                                 fill.clone(),
                                 &current_glyphs,
                                 k_font,
-                                "", // Text mapping empty for now
+                                "",
                                 current_size as f32,
                                 GlyphUnits::UserSpace,
                                 false,
                             );
-
                             current_glyphs.clear();
                         }
 
@@ -99,9 +94,7 @@ pub fn render_to_pdf(
                         if let BoxContent::Glyph { glyph_id, x_offset, y_offset, .. } = &box_.content {
                             current_glyphs.push(KrillaGlyph::new(
                                 GlyphId::new(*glyph_id as u32),
-                                // Set advance to 0 because we are providing absolute positions via offsets.
-                                // This prevents double-spacing between characters.
-                                0.0, 
+                                0.0,
                                 (relative_x + x_offset) as f32,
                                 (relative_y + y_offset) as f32,
                                 0.0,
@@ -109,9 +102,77 @@ pub fn render_to_pdf(
                             ));
                         }
                     }
-                    _ => {
-                        // Image, rule, link processing stub.
+                    BoxContent::Rule {
+                        width,
+                        height,
+                        depth,
+                    } => {
+                        if !current_glyphs.is_empty() {
+                            let k_font = get_krilla_font(current_font.unwrap(), fonts, &mut font_cache)?;
+                            surface.fill_glyphs(
+                                Point::from_xy(current_run_start_x as f32, line.baseline_y as f32),
+                                fill.clone(),
+                                &current_glyphs,
+                                k_font,
+                                "",
+                                current_size as f32,
+                                GlyphUnits::UserSpace,
+                                false,
+                            );
+                            current_glyphs.clear();
+                            current_font = None;
+                        }
+
+                        if let Some(rect) = Rect::from_xywh(
+                            box_.x as f32,
+                            (2.0 * line.baseline_y - box_.y - height) as f32,
+                            *width as f32,
+                            (height + depth) as f32,
+                        ) {
+                            let mut path_builder = PathBuilder::new();
+                            path_builder.push_rect(rect);
+                            let path = path_builder.finish().unwrap();
+                            surface.fill_path(&path, fill.clone());
+                        }
                     }
+                    BoxContent::Path { points, .. } => {
+                        if !current_glyphs.is_empty() {
+                            let k_font = get_krilla_font(current_font.unwrap(), fonts, &mut font_cache)?;
+                            surface.fill_glyphs(
+                                Point::from_xy(current_run_start_x as f32, line.baseline_y as f32),
+                                fill.clone(),
+                                &current_glyphs,
+                                k_font,
+                                "",
+                                current_size as f32,
+                                GlyphUnits::UserSpace,
+                                false,
+                            );
+                            current_glyphs.clear();
+                            current_font = None;
+                        }
+
+                        if points.len() >= 3 {
+                            let mut path_builder = PathBuilder::new();
+                            let to_pdf = |dx: f64, dy: f64| -> (f32, f32) {
+                                (
+                                    (box_.x + dx) as f32,
+                                    (2.0 * line.baseline_y - box_.y - dy) as f32,
+                                )
+                            };
+                            let (sx, sy) = to_pdf(points[0].0, points[0].1);
+                            path_builder.move_to(sx, sy);
+                            for (dx, dy) in &points[1..] {
+                                let (px, py) = to_pdf(*dx, *dy);
+                                path_builder.line_to(px, py);
+                            }
+                            path_builder.close();
+                            if let Some(path) = path_builder.finish() {
+                                surface.fill_path(&path, fill.clone());
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
 

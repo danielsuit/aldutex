@@ -2052,10 +2052,17 @@ impl<'src> Parser<'src> {
             }
         }
 
-        let end = self.current_span();
-        ast::MathNode::Group {
-            children,
-            span: start.merge(end),
+        if children.len() == 1 {
+            children.into_iter().next().unwrap_or(ast::MathNode::Group {
+                children: Vec::new(),
+                span: start,
+            })
+        } else {
+            let end = self.current_span();
+            ast::MathNode::Group {
+                children,
+                span: start.merge(end),
+            }
         }
     }
 

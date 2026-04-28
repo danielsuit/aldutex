@@ -91,6 +91,35 @@ $x^2 + y^2$
 }
 
 #[test]
+fn test_inline_math_double_dollar() {
+    let source = r#"\documentclass{article}
+\begin{document}
+before $$x + y$$ after
+\end{document}"#;
+    let (doc, diag) = parse_source(source);
+    assert!(!diag.has_errors(), "Errors: {:?}", diag.errors);
+
+    if let Some(Block::Paragraph { inlines, .. }) = doc.body.first() {
+        let has_math = inlines.iter().any(|i| matches!(i, Inline::Math { .. }));
+        assert!(has_math, "Should contain inline Math node parsed from $$...$$");
+
+        let rendered_text = inlines
+            .iter()
+            .filter_map(|i| match i {
+                Inline::Text { content, .. } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        assert!(
+            rendered_text.contains("before") && rendered_text.contains("after"),
+            "Expected surrounding text to remain in paragraph"
+        );
+    } else {
+        panic!("Expected Paragraph");
+    }
+}
+
+#[test]
 fn test_itemize_list() {
     let source = r#"\documentclass{article}
 \begin{document}

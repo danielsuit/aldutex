@@ -33,6 +33,14 @@ pub enum BoxContent {
     },
     /// A filled rectangle (for rules, fraction bars, etc.).
     Rule { width: f64, height: f64, depth: f64 },
+    /// A filled closed polygon. Points are in math coordinates relative to the
+    /// box origin: positive y is upward from the baseline.
+    Path {
+        width: f64,
+        height: f64,
+        depth: f64,
+        points: Vec<(f64, f64)>,
+    },
     /// An embedded image.
     Image {
         data: Arc<Vec<u8>>,
